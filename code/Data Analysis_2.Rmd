@@ -1,0 +1,281 @@
+---
+title: "EDA1"
+author: "Saheli Saha"
+date: "12/3/2017"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r cars}
+library(ggplot2) # Data visualization
+library(readr) # CSV file I/O, e.g. the read_csv function
+library(vcd)
+library(lattice)
+library(dplyr)
+library(lubridate)
+library(rpart)
+library(randomForest)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r}
+cleaned_data<- read_csv("loan.csv")
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r}
+ggplot(cleaned_data, aes(grade, int_rate)) +
+  geom_boxplot(fill = "white", colour = "darkblue", 
+               outlier.colour = "red", outlier.shape = 1) +
+  give_count +
+  give_mean +
+  scale_y_continuous(labels = comma) +
+  labs(title="Interest Rate by Grade", x = "Grade", y = "Interest Rate \n") +
+  facet_wrap(~ term)
+```
+
+```{r}
+ggplot(cleaned_data, aes(home_ownership, int_rate)) +
+  geom_boxplot(fill = "white", colour = "darkblue", 
+               outlier.colour = "red", outlier.shape = 1) +
+  give_count +
+  give_mean +
+  scale_y_continuous(labels = comma) +
+  facet_wrap(~ default) +
+  labs(title="Interest Rate by Home Ownership", x = "Home Ownership", y = "Interest Rate \n")
+```
+
+```{r}
+ggplot(cleaned_data, aes(grade, loan_amnt)) +
+  geom_boxplot(fill = "white", colour = "darkblue", 
+               outlier.colour = "red", outlier.shape = 1) +
+  give_count +
+  give_mean +
+  scale_y_continuous(labels = comma) +
+  facet_wrap(~ default) +
+  labs(title="Loan Amount by Grade", x = "Grade", y = "Loan Amount \n")
+
+```
+
+```{r}
+cleaned_data %>% mutate_if(is.character, as.factor) -> df
+df$issue_year <- year(as.yearmon(df$issue_d,"%b-%Y"))
+str(df)
+```
+
+```{r}
+ggplot(data=df,aes(issue_year,loan_amnt))+ 
+  geom_bar(stat = "identity", fill="light blue" ,show.legend = TRUE, width = 0.5)+ ylab("Loan amount")+
+  ggtitle("Loan Amount Distribution per year for cleaned data")+xlab("Year")
+```
+
+```{r}
+Loan_amount_grade<-aggregate(loan_amnt ~ grade + issue_year, data = df, sum)
+Plot_Loan_amount_grade <- ggplot(Loan_amount_grade,aes(x = issue_year, y = loan_amnt))
+Plot_Loan_amount_grade + geom_area(aes(fill=grade)) + xlab("Year") + ggtitle('Loan amount distribution by year by grade for cleaned data')
+
+```
+
+```{r}
+# Loan amount distribution by Annaul income level  
+#create categorical variable of annaul_income
+df$income_level <- cut(df$annual_inc , breaks =  c(0,45000,90000,150000,200000,300000,9500000),dig.lab = 7)
+loan_amnt_by_incomestatus_level <- aggregate(loan_amnt ~ income_level, data = df, sum)
+ggplot(loan_amnt_by_incomestatus_level, aes(income_level, loan_amnt, fill = income_level)) + geom_bar(stat = "identity") + scale_x_discrete(breaks=NULL)
+
+# Major share lons were issued to income level between 45K to 90K.
+```
+
+```{r}
+# Relation between Loan amount the Income level
+df$loan_amnt_class <- cut(df$loan_amnt, 3, labels = c("low", "middle", "high"))
+df$int_rate_class<-cut(df$int_rate, 4, labels = c("nrml", "mid", "high", "vhigh"))
+mosaic(  ~ income_level + loan_amnt_class, 
+         gp = shading_max,     # Type of shading eg: shading_Friendly
+         split_vertical = T,   # Split tiles of a variable vertically
+         data = df
+)
+# As expected there is high co-relation between the loan amount and the income level
+```
+
+```{r}
+mosaic(  ~ loan_amnt_class + int_rate_class, 
+         gp = shading_max,     # Type of shading
+         split_vertical = T,   # Split tiles vertically
+         data = df
+)
+```
+
+
+```{r}
+
+ggplot(df, aes(int_rate, fill = grade)) + geom_density()+ facet_grid(grade ~ term, scales = "free",space = "free") +  theme(strip.text.y = element_text(angle = 0))
+```
+
+```{r}
+ggplot(df, aes(x = annual_inc, y = loan_amnt)) + geom_point()
+```
+
+```{r}
+library(readxl)
+library(ggplot2)
+library(cowplot)
+library(maps)
+library(sqldf)
+library(fiftystater)
+library(mapproj)
+library(hexbin)
+```
+
+```{r}
+loanf <- read_csv("loan_orig.csv")
+loanf<-subset(loanf,annual_inc>0)
+hist(loanf$int_rate)
+
+```
+
+```{r}
+loan_small<-data[,c("member_id","issue_d","id")]
+```
+
+```{r}
+ggplot(data=loanf,aes(int_rate)) + geom_histogram(bins=20) + xlab("Interest Rate") + facet_wrap(~loanf$grade)
+
+ggplot(data=loanf,aes(int_rate)) + geom_histogram(bins=20) + xlab("Interest Rate") + facet_wrap(~loanf$term) 
+
+#ggplot(data=loanf,aes(group=int_rate)) + geom_boxplot()
+
+ggplot(data=loanf,aes(x=grade,y=loanf$loan_amnt,col=term)) + geom_boxplot() + ylab("Interest rate") + xlab("Credit grade")
+
+
+```
+```{r}
+loanf20.high <- subset(loanf,int_rate>20)
+loanf20.low <- subset(loanf,int_rate<=20)
+```
+
+```{r}
+ggplot(loanf,aes(addr_state,int_rate)) + geom_boxplot(colour = "light blue")
+
+ggplot(loanf,aes(addr_state)) + geom_bar() + geom_boxplot(aes(y=int_rate/0.0005), colour = "light green") + scale_y_continuous(sec.axis = sec_axis(~.*0.0005, name = "Interest rate")) + ylab("Number of applications") + xlab("State")
+
+ggplot(loanf,aes(addr_state, fill = addr_state)) + geom_bar() + scale_y_log10()
+
+ggplot(data=loanf,aes(x=int_rate, fill = int_rate)) + geom_histogram(bins=20) + xlab("Interest Rate") + facet_wrap(~loanf$term)
+```
+
+```{r}
+p1 = ggplot(loanf,aes(x=int_rate)) + 
+  geom_histogram(data=subset(loanf,int_rate<=20 & term == "36 months"),aes(x=int_rate),fill="#588c7e",bins=15) + 
+  geom_histogram(data=subset(loanf,int_rate>20 & term == "36 months"),aes(x=int_rate),fill="#8c4646",bins=15) +
+  xlab("Interest rate") + ylab("Frequency") + ggtitle("Loan with a 36 months term")
+
+p2 = ggplot(loanf,aes(x=int_rate)) + 
+  geom_histogram(data=subset(loanf,int_rate<=20 & term == "60 months"),aes(x=int_rate),fill="#588c7e",bins=15) + 
+  geom_histogram(data=subset(loanf,int_rate>20 & term == "60 months"),aes(x=int_rate),fill="#8c4646",bins=15) + 
+  xlab("Interest rate") + ylab("Frequency") + ggtitle("Loans with a 60 months term")
+```
+
+```{r}
+plot_grid(p1,p2)
+
+```
+
+```{r}
+loanf$intcat<-cut(loanf$int_rate,seq(0,30,6),labels=c(1:5))
+loanf$intcat<-cut(loanf$int_rate,seq(0,30,3))
+#loanf$intcat[is.na(loanf$intcat)]<-1
+ggplot(loanf,aes(x=funded_amnt,fill=intcat)) + geom_histogram(bins=20) + facet_wrap(~grade, scales = "free_y")
+ggplot(data=loanf,aes(x=intcat,y=loanf$annual_inc)) + geom_boxplot() + ylab("Loan Amount") + xlab("Interest Rate")
+```
+
+```{r}
+min(log(loanf$annual_inc))
+loanf$salcat<-cut(log(loanf$annual_inc),seq(7,17,2))
+loanf$salcat<-cut(log(loanf$annual_inc),seq(7,18,2),labels=c(1:5))
+#View(map.df)
+map.df <- read_csv("mapdf.csv")
+```
+
+```{r}
+ggplot(map.df, aes(map_id = state, label=state)) + 
+  # map points to the fifty_states shape data
+  geom_map(aes(fill = log(apps)), map = fifty_states) + 
+  expand_limits(x = fifty_states$long, y = fifty_states$lat) +
+  coord_map() +
+  scale_x_continuous(breaks = NULL) + 
+  scale_y_continuous(breaks = NULL) +
+  labs(x = "", y = "") +
+  theme(legend.position = "bottom", legend.key.width=unit(2,"cm"),
+        panel.background = element_blank())
+
+```
+
+```{r}
+mapdf=map.df
+map.df2 = sqldf("select a.*, b.population from mapdf as a, uspop as b where a.state=b.state")
+map.df2$apr = map.df2$apps / map.df2$population
+map.df2$aprl = log(map.df2$apr)
+
+all_states <- map_data("state")
+map.df2$region = map.df2$state
+total <- merge(all_states,map.df2,by="region")
+head(total)
+total <- total[total$region!="district of columbia",]
+map.lables = sqldf("select state_abb, avg(long) as long, avg(lat) as lat from total group by state_abb")
+p <- ggplot()
+p <- p + geom_polygon(data=total, aes(x=long, y=lat, group = group, fill=total$aprl),colour="white"
+) + scale_fill_continuous(low = "thistle2", high = "darkred", guide="colorbar")
+P1 <- p + theme_bw()  + labs(fill = "Log(Number of loan applications/population)" 
+                             ,title = "Loan applications distribution across states", x="", y="")
+P2<-P1 + scale_y_continuous(breaks=c()) + scale_x_continuous(breaks=c()) + theme(panel.border =  element_blank())
+P2 + geom_text(data = map.lables,aes(long, lat, label=state_abb))
+write.csv(map.lables,"lable_map.csv")
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
+
+

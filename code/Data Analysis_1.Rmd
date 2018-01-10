@@ -1,0 +1,114 @@
+---
+title: "Text Data Analysis"
+date: "12/2/2017"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(ggplot2) # Data visualization
+library(readr) # CSV file I/O, e.g. the read_csv function
+library(vcd)
+library(lattice)
+library(dplyr)
+library(lubridate)
+library(plyr)
+library(tidyverse)
+library(caret)
+library(readxl)
+library(tidyverse)
+library(scales)
+library(ggthemes)
+library(zoo)
+library(RColorBrewer)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+data<- read_csv("loan_orig.csv")
+df = data.frame(data)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+
+```{r}
+df %>% mutate_if(is.character, as.factor) -> df
+df$issue_year <- year(as.yearmon(df$issue_d,"%b-%Y"))
+str(df)
+```
+
+```{r}
+
+ggplot(data=df,aes(issue_year,loan_amnt))+ 
+  geom_bar(stat = "identity", fill="light green" ,show.legend = TRUE, width = 0.5)+ ylab("Loan amount")+
+  ggtitle("Loan Amount Distribution per year for Raw Data")+xlab("Year")
+```
+
+```{r}
+Loan_amount_grade<-aggregate(loan_amnt ~ grade + issue_year, data = df, sum)
+Plot_Loan_amount_grade <- ggplot(Loan_amount_grade,aes(x = issue_year, y = loan_amnt))
+Plot_Loan_amount_grade + geom_area(aes(fill=grade)) + xlab("Year") + ggtitle('Loan amount distribution by year by grade for Raw Data')
+```
+```{r}
+head(subset(df, select = 'home_ownership'))
+```
+
+
+
+```{r}
+# Loan amount distribution by Annaul income level  
+#create categorical variable of annaul_income
+df$income_level <- cut(df$annual_inc , breaks =  c(0,45000,90000,150000,200000,300000,9500000),dig.lab = 7)
+loan_amnt_by_incomestatus_level <- aggregate(loan_amnt ~ income_level, data = df, sum)
+ggplot(loan_amnt_by_incomestatus_level, aes(income_level, loan_amnt, fill = income_level)) + geom_bar(stat = "identity") + scale_x_discrete(breaks=NULL)
+
+# Major share lons were issued to income level between 45K to 90K.
+```
+
+```{r}
+# Relation between Loan amount the Income level
+df$loan_amnt_class <- cut(df$loan_amnt, 3, labels = c("low", "middle", "high"))
+df$int_rate_class<-cut(df$int_rate, 4, labels = c("nrml", "mid", "high", "vhigh"))
+mosaic(  ~ income_level + loan_amnt_class, 
+         gp = shading_max,     # Type of shading eg: shading_Friendly
+         split_vertical = T,   # Split tiles of a variable vertically
+         data = df
+)
+# As expected there is high co-relation between the loan amount and the income level
+```
+
+```{r}
+mosaic(  ~ loan_amnt_class + int_rate_class, 
+         gp = shading_max,     # Type of shading
+         split_vertical = T,   # Split tiles vertically
+         data = df
+)
+```
+
+```{r}
+# The purpose of Loan & it's current status 
+#ggplot(df, aes(x = purpose, fill = loan_status)) + geom_bar() + facet_grid(term ~.) + coord_flip()
+```
+
+```{r}
+ggplot(data=df, aes(sub_grade, loan_amnt))+geom_boxplot(aes(fill=sub_grade))+
+  theme(axis.text.x = element_blank())+
+  labs(list(title = "Loan amount by Sub grade",x = "Sub grade of Loan",y = "Loan Amount")) 
+#bwplot( sub_grade ~ loan_amnt| loan_amnt_class, data = lcd, layout=c(1,3) )
+```
+
+```{r}
+ggplot(df, aes(int_rate, fill = grade)) + geom_density()+ facet_grid(grade ~ term, scales = "free",space = "free") +  theme(strip.text.y = element_text(angle = 0))
+```
+
+```{r}
+ggplot(df, aes(x = annual_inc, y = loan_amnt)) + geom_point()
+```
+

@@ -1,0 +1,199 @@
+---
+title: "Data Analysis"
+date: "12/2/2017"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{R Libraries}
+library(ggplot2) # Data visualization
+library(readr) # CSV file I/O, e.g. the read_csv function
+library(vcd)
+library(lattice)
+library(dplyr)
+library(lubridate)
+library(plyr)
+library(tidyverse)
+library(caret)
+library(readxl)
+```
+
+```{r code}
+data<- read_csv("loan_orig.csv") # Raw data
+```
+
+```{r convert to data frame}
+df = data.frame(data)
+
+```
+
+```{r}
+#data transformation for some of the attributes of character to numeric
+char_to_convert <- c("annual_inc_joint", "mths_since_last_major_derog", "open_acc_6m",
+    "open_il_6m", "open_il_12m", "open_il_24m", "mths_since_rcnt_il",
+    "total_bal_il", "il_util", "open_rv_12m", "open_rv_24m",
+    "max_bal_bc", "all_util", "total_rev_hi_lim", "total_cu_tl",
+    "inq_last_12m", "dti_joint", "inq_fi", "tot_cur_bal", "tot_coll_amt")
+
+df <-
+  df %>%
+  mutate_at(.vars = char_to_convert,.funs = funs(as.numeric) )
+
+```
+
+```{r}
+# check the date attributes
+
+date_attributes <- c( "issue_d", "last_pymnt_d", "last_credit_pull_d",
+    "next_pymnt_d", "earliest_cr_line", "next_pymnt_d")
+df %>%
+  select_(.dots = date_attributes) %>% str()
+
+```
+
+```{r}
+#Converting the date attribute from character to date format by assigning the 1st of the mont
+
+date_formater <- function(x){
+  as.Date(paste0("01-", x), format = "%d-%b-%Y")
+  } 
+
+df <-
+  df %>%
+  mutate_at(.funs = funs(date_formater), .vars = date_attributes)
+```
+
+```{r}
+#applying 0 to some of the attributes which have NA's as they carry valuable information and will be helpul in modelling  
+
+na_to_zero <-
+  c("mths_since_last_delinq", "mths_since_last_record",
+    "mths_since_last_major_derog")
+
+df <- 
+  df %>%
+  mutate_at(.vars = na_to_zero, .funs = funs(replace(., is.na(.), 0)))
+```
+
+Some of the potential varibles which are useful in defining the default payments are,
+a) loan_status : This attribute defines the status of the loan
+b) delinq_2yrs: The number of 30+ days where an individual has past incidence of the deliquency in 2 years
+c) mnths_since_last_delinq : The number of months since the individual last deliquency 
+
+```{r}
+default_vars <- c("loan_status", "delinq_2yrs", "mths_since_last_delinq")
+purrr::map(.x = df[, default_vars], .f = base::unique)
+```
+
+The loan status has all the current status of the loans, doing a count of unique loan status
+
+```{r}
+data.frame(table(df$loan_status))
+```
+
+The Values of the loan_status can be found from the following link https://triamus.github.io/project/lending-club-loan-data-in-r/#correlation
+
+We can define a loan as default from the following loan_status values,
+
+* Default
+* Does not meet the credit policy. Status:Charged Off
+* In Grace Period
+* Late (16-30 days)
+* Late (31-120 days)
+So we can list of attributes to define the default attribute for loan dataframe,
+
+```{r}
+defaulted <- 
+  c("Default", 
+    "Status:Charged Off", 
+    "In Grace Period", 
+    "Late (16-30 days)", 
+    "Late (31-120 days)")
+head(defaulted)
+```
+Assign boolean indicator for the default attribute
+
+```{r}
+df <-
+  df %>%
+  mutate(default = ifelse(!(loan_status %in% defaulted), FALSE, TRUE))
+
+```
+
+```{r}
+table(df$default) / nrow(df)
+```
+
+Let us find attributes which have na's in the loan dataFrame
+
+```{r}
+
+na_count <-sapply(df, function(y) sum(length(which(is.na(y)))))
+na_count <- data.frame(na_count)
+unique_count <- sapply(df, function(x) sum(length(unique(x))))
+unique_count <- data.frame(unique_count)
+#View(na_count)
+#View(unique_count)
+
+```
+
+Based on na and unique count we can remove the following attributes as they are unfit for model fitting , sub-grade attribute is dropped as grade attribute gives us more insights and loan_status has been used to define the default atribute.
+
+```{r}
+remove_attributes = c("annual_inc_joint", "dti_joint", "policy_code", "id", "member_id",
+    "emp_title", "url", "desc", "title", "open_acc_6m", "open_il_6m", 
+    "open_il_12m", "open_il_24m", "mths_since_rcnt_il", "total_bal_il", 
+    "il_util", "open_rv_12m", "open_rv_24m", "max_bal_bc", "all_util",
+    "total_rev_hi_lim", "inq_fi", "total_cu_tl", "inq_last_12m",
+    "verification_status_joint", "next_pymnt_d","sub_grade", "loan_status")
+df <- df %>% dplyr::select(-one_of(remove_attributes))
+
+head(df)
+  
+```
+
+```{r}
+give_count <- 
+  stat_summary(fun.data = function(x) return(c(y = median(x)*1.06, label = length(x))),
+               geom = "text")
+
+# see http://stackoverflow.com/questions/19876505/boxplot-show-the-value-of-mean
+give_mean <- 
+  stat_summary(fun.y = mean, colour = "darkgreen", geom = "point", 
+               shape = 18, size = 3, show.legend = FALSE)
+```
+
+```{r}
+ggplot(df, aes(grade, loan_amnt)) +
+  geom_boxplot(fill = "white", colour = "darkblue", 
+               outlier.colour = "red", outlier.shape = 1) +
+  give_count +
+  give_mean +
+  
+  facet_wrap(~ default) +
+  labs(title="Loan Amount by Grade", x = "Grade", y = "Loan Amount \n")
+
+```
+
+```{r}
+ggplot(df, aes(grade, int_rate)) +
+  geom_boxplot(fill = "white", colour = "darkblue", 
+               outlier.colour = "red", outlier.shape = 1) +
+  give_count +
+  give_mean +
+  
+  labs(title="Interest Rate by Grade", x = "Grade", y = "Interest Rate \n") +
+  facet_wrap(~ term)
+
+ggplot(df, aes(home_ownership, int_rate)) +
+  geom_boxplot(fill = "white", colour = "darkblue", 
+               outlier.colour = "red", outlier.shape = 1) +
+  give_count +
+  give_mean +
+  scale_y_continuous(labels = comma) +
+  facet_wrap(~ default) +
+  labs(title="Interest Rate by Home Ownership", x = "Home Ownership", y = "Interest Rate \n")
+```

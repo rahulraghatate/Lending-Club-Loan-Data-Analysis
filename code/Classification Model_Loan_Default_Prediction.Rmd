@@ -1,0 +1,301 @@
+---
+title: "Classification Model"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{R Libraries}
+library(ggplot2) # Data visualization
+library(readr) # CSV file I/O, e.g. the read_csv function
+library(vcd)
+library(lattice)
+library(dplyr)
+library(lubridate)
+library(plyr)
+library(tidyverse)
+library(caret)
+library(readxl)
+```
+
+```{r}
+#Data Import and Feature Engineering and Selection
+
+data<- read_csv("../data/loan_orig.csv")
+
+#Assign the data to a dataframe
+na_count_orig <-sapply(data, function(y) sum(length(which(is.na(y)))))
+na_count_orig <- data.frame(na_count_orig)
+#View(na_count_orig)
+
+
+#Convert input to dataframe
+dataFrame = data.frame(data)
+
+
+#replacing with zero
+dataFrame$emp_length[is.na(dataFrame$emp_length)] <- 0
+dataFrame$mths_since_last_delinq[is.na(dataFrame$mths_since_last_delinq)] <- 0
+dataFrame$mths_since_last_record[is.na(dataFrame$mths_since_last_record)] <- 0
+dataFrame$mths_since_last_major_derog[is.na(dataFrame$mths_since_last_major_derog)] <- 0
+
+#more than 50% NA columns are removed
+dataFrame = dataFrame[, -which(colMeans(is.na(dataFrame)) > 0.5)]
+
+#issue date and year
+dataFrame$issue_d <- mdy(dataFrame$issue_d)
+dataFrame <- dataFrame %>% mutate(issue_d_year = year(issue_d)) 
+
+
+#credit history length
+dataFrame$earliest_cr_line <- mdy(dataFrame$earliest_cr_line)
+dataFrame$credit_age = as.numeric(difftime(Sys.Date(),dataFrame$earliest_cr_line, units = 'days'))
+dataFrame$credit_age[dataFrame$credit_age < 0 | is.na(dataFrame$credit_age)] = 0
+dataFrame$credit_age<-as.numeric(round(dataFrame$credit_age/365))
+
+
+#removing columns that don't matter
+# purpose has 13 classes, ulike title which has 60000+. 
+# A lot of these would be variations of the same thing, and need grouping,so adding title to the rempove list, and keeping only purpose
+# only 52 cases differs, so adding funded_amnt_inv to remove list
+# similar scene with out_prncp_inv and total_pymnt_inv, funded_amt (is the same as loan amt)
+# length(dataFrame[dataFrame$funded_amnt != dataFrame$funded_amnt_inv,])
+# policy code has only one value, so removing it
+
+dataFrame = within(dataFrame,rm("url","emp_title","id","member_id","funded_amnt","last_credit_pull_d","earliest_cr_line","next_pymnt_d","funded_amnt_inv","last_pymnt_d","title","out_prncp_inv","total_pymnt_inv","policy_code"))
+
+#converting term to numeric
+dataFrame$term = as.numeric(gsub("([0-9]+).*", "\\1", dataFrame$term))
+
+#fixing employee length
+#dataFrame$emp_length[dataFrame$emp_length == '< 1 year'] = 0
+#dataFrame$emp_length = as.numeric(gsub("\\D+", "", dataFrame$emp_length))
+#dataFrame = dataFrame[!is.na(dataFrame$annual_inc),]
+
+dataFrame$emp_length <- sub('n/a', NA, dataFrame$emp_length)
+dataFrame$emp_length <- sub('< 1 year',0,dataFrame$emp_length)
+dataFrame$emp_length <- sub('10\\+ years',11,dataFrame$emp_length)
+regpos <- regexec('([0-9]{1,2})(.)*', dataFrame$emp_length)
+dataFrame$emp_length <- sapply(regmatches(dataFrame$emp_length,regpos), function(x)x[2])
+dataFrame$emp_length <- sub('0','0.5', dataFrame$emp_length)
+dataFrame$emp_length <- as.numeric(dataFrame$emp_length)
+
+#dataFrame = dataFrame[!is.na(dataFrame$emp_length),]
+
+#dropping rows with NAs for important columns
+dataFrame = dataFrame[!is.na(dataFrame$delinq_2yrs),]
+dataFrame = dataFrame[!is.na(dataFrame$revol_util),]
+dataFrame = dataFrame[!is.na(dataFrame$tot_coll_amt),]
+
+#fixing home ownership and zipcode
+dataFrame$home_ownership[dataFrame$home_ownership == 'NONE' | dataFrame$home_ownership == 'ANY'] = 'OTHER'
+dataFrame$zip_code = as.numeric(gsub("\\D+", "", dataFrame$zip_code))
+
+#character variables that need to be numeric
+to_numeric = c("tot_cur_bal", "tot_coll_amt", "total_rev_hi_lim", "mths_since_last_major_derog")
+dataFrame = dataFrame %>% mutate_at(.funs = funs(as.numeric), .vars = to_numeric)
+
+#variables that need to be made factors
+to_factors = c("grade","sub_grade","application_type", "initial_list_status", "term", "emp_length", "addr_state", "purpose", "home_ownership","loan_status","pymnt_plan","verification_status")
+dataFrame = dataFrame %>% mutate_at(.funs = funs(as.factor), .vars = to_factors)
+
+#checking correlations of numeric features
+#c("installment","total_acc","total_pymnt","out_prncp","collection_recovery_fee","total_rev_hi_lim")
+nums <- sapply(dataFrame, is.numeric)
+numeric_features = dataFrame[,nums]
+correlation = data.frame(round(cor(numeric_features, use = "complete.obs"),2))
+
+# #checking correlations of non numeric features
+# nonnumeric_features = dataFrame[,!nums]
+# correlation2 = data.frame(round(cor(nonnumeric_features, use = "complete.obs"),2))
+dataFrame = within(dataFrame,rm("installment","total_acc","total_rec_prncp","out_prncp","collection_recovery_fee","total_rev_hi_lim"))
+
+#transforming no of inq to categories
+dataFrame$grade_inq = cut(dataFrame$inq_last_6mths,breaks = c(-Inf,0,2,6,10,Inf), labels=c("A","B","C","D","E"))
+
+
+#dataFrame %>% mutate_if(is.character,as.factor) -> dataFrame
+
+#dataFrame$earliest_cr_line <- mdy(dataFrame$earliest_cr_line)
+#dataFrame <- dataFrame %>% mutate(earliest_cr_line_year = year(earliest_cr_line))
+
+
+na_count_rd <-sapply(dataFrame, function(y) sum(length(which(is.na(y)))))
+na_count_rd <- data.frame(na_count_rd)
+View(na_count_rd)
+```
+
+
+```{r}
+library(caret)
+
+#This is for classification
+head(dataFrame1)
+defaulted <- 
+  c("Default", 
+    "Does not meet the credit policy. Status:Charged Off", 
+    "In Grace Period", 
+    "Late (16-30 days)", 
+    "Late (31-120 days)")
+
+dataFrame1 <-
+  dataFrame1 %>%
+  mutate(default = ifelse(!(loan_status %in% defaulted), FALSE, TRUE))
+
+
+table(dataFrame1$default) / nrow(dataFrame1)
+
+#Apply Mars function to select important attributes for classification fproblem of default
+
+library(earth)
+marsModel <- earth(default ~ ., data=dataFrame1[,-c(11)],pmethod="backward",nprune=20, nfold=2) # build model
+ev <- evimp (marsModel) # estimate variable importance
+marsModel
+ev
+
+```
+
+```{r}
+#Plot feature importance
+plotmo(marsModel)
+```
+
+```{r}
+#Features selected from mars function
+name_vector = c("total_rec_late_fee","int_rate","last_pymnt_amnt","recoveries","issue_d_year")
+
+#Partition the data into training and test
+set.seed(6438)
+
+train_idx <- 
+  caret::createDataPartition(y = dataFrame1$default, times = 1, 
+                             p = .8, list = FALSE)
+
+train_data <- dataFrame1[train_idx, ]
+test_data <- dataFrame1[-train_idx, ]
+dim(test_data)
+dim(train_data)
+
+library(corrplot)
+int_vars <- 
+  train_data %>% 
+  sapply(is.numeric) %>% 
+  which() %>% 
+  names()
+
+corrplot::corrplot(cor(train_data[, int_vars], use = "complete.obs"), 
+                   method = "pie", type = "lower")
+
+```
+
+
+```{r}
+#Caret correlation function
+caret::findCorrelation(cor(train_data[, int_vars], use = "complete.obs"), 
+                       names = TRUE, cutoff = .5,exact = TRUE)
+```
+
+```{r}
+#Remove attributes which are highly correlated
+
+remove_attributes <- c ("total_pymnt","total_rec_int","pub_rec","mths_since_last_major_derog")
+train_data <- train_data %>% dplyr::select(-one_of(remove_attributes))
+head(train_data)
+
+#downsizing the data for equal distriuton of the class
+table(train_data$default) / nrow(train_data)
+
+downsize_train_data <- 
+  caret::downSample(x = train_data[, !(names(train_data) %in% c("default"))], 
+                    y = as.factor(train_data$default), yname = "default")
+
+table(downsize_train_data$default) / nrow(downsize_train_data)
+
+#find number of character attributes
+name_vector
+char_vars <- 
+  downsize_train_data %>% 
+  sapply(is.character) %>% 
+  which() %>% 
+  names()
+
+char_vars
+```
+
+```{r}
+#doing the same for the test data
+dim(downsize_train_data)
+dim(test_data)
+```
+
+```{r}
+# Modeling
+model_vars = c("total_rec_late_fee","int_rate","last_pymnt_amnt","recoveries","issue_d_year","default","grade")
+
+ctrl <- 
+  trainControl(method = "repeatedcv", 
+               number = 10,
+               repeats = 5,
+               classProbs = TRUE,
+               summaryFunction = twoClassSummary,
+               savePredictions = TRUE,
+               verboseIter = FALSE)
+
+model_glm_2 <-
+  downsize_train_data %>%
+  dplyr::select(model_vars)%>%
+  mutate(default = as.factor(ifelse(default == TRUE, "yes", "no"))) %>%
+  filter(complete.cases(.)) %>%
+  train(default ~ ., 
+        data = ., 
+        method = "glm", 
+        family = "binomial",
+        metric = "ROC",
+        trControl = ctrl)
+
+varImp(model_glm_2)
+summary(model_glm_2)
+
+model_glm_2
+```
+
+```{r}
+#Prediction for Test Data
+model_glm_2_pred <- 
+  predict(model_glm_2, 
+          newdata = test_data %>% 
+            dplyr::select(model_vars) %>%
+            mutate(default = as.factor(ifelse(default == TRUE, 
+                                              "yes", "no"))) %>%
+            filter(complete.cases(.)), 
+          type = "prob")
+head(model_glm_2_pred, 3)
+```
+
+```{r}
+#Create Confusion Matrix
+caret::confusionMatrix(
+  data = ifelse(model_glm_2_pred[, "yes"] > 0.5, "yes", "no"), 
+  reference = as.factor(ifelse(test_data[complete.cases(test_data[, model_vars]), 
+                                    "default"] == TRUE, "yes", "no")),
+  positive = "yes")
+```
+
+```{r}
+#RoC curve
+temp <- as.factor(ifelse(test_data[complete.cases(test_data[, model_vars]),
+                                             "default"] == TRUE, "yes", "no"))
+
+roc_glm_2 <- pROC::roc(response = temp,predictor = model_glm_2_pred[, "yes"])
+
+roc_glm_2
+```
+
+```{r}
+#Plot of ROC
+library(pROC)
+pROC::plot.roc(x = roc_glm_2, legacy.axes = FALSE, xlim = c(1, 0), asp = NA, col ="blue")
+```
